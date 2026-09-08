@@ -14,13 +14,18 @@ _T = TypeVar("_T")
 
 _GEO_HINTS = (
     "451",
+    "403",
     "restricted location",
     "unavailable from a restricted",
     "eligibility",
     "restricted location according",
+    "cloudfront",
+    "not available in your region",
+    "service not available in your area",
 )
-_SPOT_CHAIN = ("binance", "bybit", "okx")
-_FUTURES_CHAIN = ("binance", "bybit", "okx")
+_SPOT_CHAIN = ("binance", "bybit", "okx", "kucoin")
+_FUTURES_CHAIN = ("binance", "bybit", "okx", "kucoin")
+_GEO_STATUSES = {403, 451}
 
 _CRYPTO_QUOTES = ("USDT", "USDC", "BUSD", "FDUSD", "USD")
 _FUTURES_MARKS = {"FUT", "P", "PERP", "USDT"}
@@ -194,9 +199,33 @@ def _proxy_url() -> str:
     return (_settings().market_http_proxy or "").strip()
 
 
+def binance_rest_v3_base(host: str = "") -> str:
+    """Public Binance REST root: https://data-api.binance.vision/api/v3."""
+    raw = (host or _settings().binance_rest_host or "https://data-api.binance.vision").rstrip("/")
+    if raw.endswith("/api/v3"):
+        return raw
+    return f"{raw}/api/v3"
+
+
+def _binance_url_overrides(host: str) -> dict[str, str]:
+    """ccxt already appends /exchangeInfo to `public`, so `public` must include /api/v3."""
+    raw = (host or "https://data-api.binance.vision").rstrip("/")
+    if raw.endswith("/api/v3"):
+        root = raw[: -len("/api/v3")]
+        public = raw
+    else:
+        root = raw
+        public = f"{raw}/api/v3"
+    return {
+        "public": public,
+        "private": public,
+        "v1": f"{root}/api/v1",
+    }
+
+
 def _is_geo_blocked(exc: BaseException) -> bool:
     status = getattr(exc, "http_status", None) or getattr(exc, "status", None)
-    if status == 451:
+    if status in _GEO_STATUSES:
         return True
     text = str(exc).lower()
     return any(hint in text for hint in _GEO_HINTS)
@@ -207,11 +236,25 @@ def _venue_chain(market_type: str) -> tuple[str, ...]:
         if _proxy_url():
             return _FUTURES_CHAIN
         # fapi.binance.com is geo-blocked from US clouds; skip unless a proxy is set.
-        return ("bybit", "okx")
+        # Bybit public REST often returns 403 from the same regions — OKX/KuCoin stay reachable.
+        return ("okx", "kucoin", "bybit")
     return _SPOT_CHAIN
 
 
+def _okx_inst_id(spec: dict[str, Any]) -> str:
+    """OKX native ids use dashes: BTC-USDT spot, BTC-USDT-SWAP perpetual."""
+    display = spec.get("display") or ""
+    inst = display.replace("/", "-")
+    if spec.get("market_type") == "futures":
+        if not inst.endswith("-SWAP"):
+            inst = f"{inst}-SWAP"
+        return inst
+    return inst
+
+
 def _venue_symbol(name: str, spec: dict[str, Any]) -> str:
+    if name == "okx":
+        return _okx_inst_id(spec)
     if name == "binance":
         return spec["ccxt"]
     if spec["market_type"] == "futures":
@@ -231,6 +274,7 @@ def _make_client(name: str, market_type: str) -> ccxt.Exchange:
     options: dict[str, Any] = {
         "enableRateLimit": True,
         "timeout": 20_000,
+        "headers": {"User-Agent": "Mozilla/5.0 (compatible; SHC-market/1.0)"},
         "options": {
             "adjustForTimeDifference": True,
             "fetchCurrencies": False,
@@ -240,13 +284,7 @@ def _make_client(name: str, market_type: str) -> ccxt.Exchange:
         host = (_settings().binance_rest_host or "https://data-api.binance.vision").rstrip("/")
         factory = ccxt.binanceusdm if kind == "futures" else ccxt.binance
         if kind == "spot":
-            options["urls"] = {
-                "api": {
-                    "public": host,
-                    "private": host,
-                    "v1": host,
-                }
-            }
+            options["urls"] = {"api": _binance_url_overrides(host)}
             options["options"]["defaultType"] = "spot"
         else:
             options["options"]["defaultType"] = "future"
@@ -259,6 +297,11 @@ def _make_client(name: str, market_type: str) -> ccxt.Exchange:
     elif name == "okx":
         options["options"]["defaultType"] = "swap" if kind == "futures" else "spot"
         client = ccxt.okx(options)
+    elif name == "kucoin":
+        options["options"]["defaultType"] = "swap" if kind == "futures" else "spot"
+        factory = ccxt.kucoinfutures if kind == "futures" else ccxt.kucoin
+        client = factory(options)
+        client.has["fetchCurrencies"] = False
     else:
         raise ValueError(f"Unsupported crypto venue: {name}")
     client.httpProxy = None
@@ -276,16 +319,20 @@ def _client(name: str, market_type: str) -> ccxt.Exchange:
         return cached
 
 
+def _mark_blocked(name: str, exc: BaseException) -> None:
+    if _is_geo_blocked(exc):
+        _blocked.add(name)
+
+
 def _try_venues(market_type: str, runner: Callable[[ccxt.Exchange, str], _T]) -> _T:
     errors: list[str] = []
     for name in _venue_chain(market_type):
-        if name == "binance" and "binance" in _blocked:
+        if name in _blocked:
             continue
         try:
             return runner(_client(name, market_type), name)
         except Exception as exc:  # noqa: BLE001
-            if _is_geo_blocked(exc):
-                _blocked.add("binance")
+            _mark_blocked(name, exc)
             errors.append(f"{name}: {exc}")
     raise RuntimeError("No reachable crypto market-data venue: " + "; ".join(errors))
 
@@ -294,17 +341,17 @@ def get_exchange(market_type: str = "spot") -> ccxt.Exchange:
     kind = "futures" if str(market_type or "").lower() == "futures" else "spot"
     last_exc: Exception | None = None
     for name in _venue_chain(kind):
-        if name == "binance" and "binance" in _blocked:
+        if name in _blocked:
             continue
         try:
             return _client(name, kind)
         except Exception as exc:  # noqa: BLE001
             last_exc = exc
-            if _is_geo_blocked(exc):
-                _blocked.add("binance")
+            _mark_blocked(name, exc)
     if last_exc:
         raise last_exc
-    return _client("bybit", kind)
+    fallback = next((name for name in _venue_chain(kind) if name not in _blocked), "okx")
+    return _client(fallback, kind)
 
 
 def fetch_crypto_tickers(market_type: str = "spot") -> dict[str, Any]:
@@ -326,13 +373,23 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 300, delayed: bool = F
         return delay_ohlcv(synced) if delayed else synced
 
     def load(client: ccxt.Exchange, name: str) -> list[list[Any]]:
-        pair = _venue_symbol(name, spec)
         used = _timeframe_for(name, tf)
+
+        def pull(pair: str, timeframe: str) -> list[list[Any]]:
+            return client.fetch_ohlcv(pair, timeframe=timeframe, limit=limit + extra)
+
+        pair = _venue_symbol(name, spec)
         try:
-            return client.fetch_ohlcv(pair, timeframe=used, limit=limit + extra)
+            return pull(pair, used)
         except Exception:
+            alt = spec["ccxt"] if spec["market_type"] == "futures" else spec["display"]
+            if name == "okx" and alt != pair:
+                try:
+                    return pull(alt, used)
+                except Exception:
+                    pass
             if used == "1s":
-                return client.fetch_ohlcv(pair, timeframe="1m", limit=limit + extra)
+                return pull(pair, "1m")
             raise
 
     rows = _try_venues(spec["market_type"], load)
@@ -357,10 +414,17 @@ def fetch_ticker(symbol: str) -> dict[str, Any]:
             "venue": row.get("venue"),
             "name": row.get("name"),
         }
-    data = _try_venues(
-        spec["market_type"],
-        lambda client, name: client.fetch_ticker(_venue_symbol(name, spec)),
-    )
+    def load_ticker(client: ccxt.Exchange, name: str) -> dict[str, Any]:
+        pair = _venue_symbol(name, spec)
+        try:
+            return client.fetch_ticker(pair)
+        except Exception:
+            alt = spec["ccxt"] if spec["market_type"] == "futures" else spec["display"]
+            if name == "okx" and alt != pair:
+                return client.fetch_ticker(alt)
+            raise
+
+    data = _try_venues(spec["market_type"], load_ticker)
     data["exchange"] = spec["exchange"]
     data["market_type"] = spec["market_type"]
     data["display_symbol"] = spec["display"]
@@ -372,7 +436,14 @@ def fetch_order_book(symbol: str, limit: int = 50) -> dict[str, Any]:
     spec = parse_market_symbol(symbol)
     if not spec["crypto"]:
         return get_exchange().fetch_order_book(symbol, limit=limit)
-    return _try_venues(
-        spec["market_type"],
-        lambda client, name: client.fetch_order_book(_venue_symbol(name, spec), limit=limit),
-    )
+    def load_book(client: ccxt.Exchange, name: str) -> dict[str, Any]:
+        pair = _venue_symbol(name, spec)
+        try:
+            return client.fetch_order_book(pair, limit=limit)
+        except Exception:
+            alt = spec["ccxt"] if spec["market_type"] == "futures" else spec["display"]
+            if name == "okx" and alt != pair:
+                return client.fetch_order_book(alt, limit=limit)
+            raise
+
+    return _try_venues(spec["market_type"], load_book)

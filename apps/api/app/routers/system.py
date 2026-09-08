@@ -13,8 +13,8 @@ from typing import Any
 
 from fastapi import APIRouter, Query
 
-from apps.api.app.config import get_settings
 from apps.api.app.services import stocks
+from apps.api.app.services.market import binance_rest_v3_base
 from apps.api.app.services.yahoo import _cache as upstream_cache
 
 router = APIRouter(prefix="/api/system", tags=["system"])
@@ -23,8 +23,7 @@ _STARTED = time.time()
 
 
 def _binance_ping_url() -> str:
-    host = (get_settings().binance_rest_host or "https://data-api.binance.vision").rstrip("/")
-    return f"{host}/api/v3/time"
+    return f"{binance_rest_v3_base()}/time"
 
 
 def _peak_rss_mb() -> float:
