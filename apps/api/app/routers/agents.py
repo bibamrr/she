@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -169,10 +170,15 @@ def agent_reports(
     return {"reports": execution.list_reports(session, user, kind, 24)}
 
 
+AGENT_CYCLE_SECONDS = 60
+AGENT_MIN_IDLE_SECONDS = 20
+
+
 async def agent_loop() -> None:
     await asyncio.sleep(15)
     cycle = 0
     while True:
+        started = time.perf_counter()
         try:
             from apps.api.app.services import botday
 
@@ -186,12 +192,13 @@ async def agent_loop() -> None:
                 )
             report = await asyncio.to_thread(execution.tick_all)
             logger.info(
-                "execution tick venue=%s tfs=%s hits=%s approved=%s opened=%s",
+                "execution tick venue=%s tfs=%s hits=%s approved=%s opened=%s took=%.1fs",
                 report.get("venue"),
                 report.get("timeframes"),
                 report.get("hits"),
                 report.get("approved"),
                 report.get("opened"),
+                time.perf_counter() - started,
             )
             cycle += 1
             if report.get("opened") or cycle % 3 == 0:
@@ -201,4 +208,6 @@ async def agent_loop() -> None:
             raise
         except Exception as exc:  # noqa: BLE001
             logger.warning("agent loop failed: %s", exc)
-        await asyncio.sleep(60)
+        # A slow desk must not stack cycles back-to-back and starve the API.
+        elapsed = time.perf_counter() - started
+        await asyncio.sleep(max(AGENT_MIN_IDLE_SECONDS, AGENT_CYCLE_SECONDS - elapsed))

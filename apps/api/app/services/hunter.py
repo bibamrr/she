@@ -25,16 +25,39 @@ EQUITY_SCAN_CAP = 16
 
 # One shared pool plus a gate on the fan-out scans: without it, a handful of
 # concurrent requests would hold hundreds of dataframes in memory at once.
+# The background sweep gets its own single permit so the agent loop can never
+# take every slot and stall an interactive scan.
 _POOL = ThreadPoolExecutor(max_workers=10, thread_name_prefix="shc-scan")
-_HEAVY_GATE = threading.Semaphore(2)
+_HEAVY_GATE = threading.Semaphore(3)
+_BACKGROUND_GATE = threading.Semaphore(1)
+_GC_EVERY = 8
+_gc_lock = threading.Lock()
+_gc_pending = 0
 
 
-def _fan_out(fn, items: list[Any]) -> list[Any]:
+def _maybe_collect() -> None:
+    """Full collections are expensive; run one every few sweeps, not every sweep."""
+    global _gc_pending
+    with _gc_lock:
+        _gc_pending += 1
+        if _gc_pending < _GC_EVERY:
+            return
+        _gc_pending = 0
+    gc.collect()
+
+
+def _fan_out(fn, items: list[Any], background: bool = False) -> list[Any]:
+    if background:
+        with _BACKGROUND_GATE, _HEAVY_GATE:
+            try:
+                return list(_POOL.map(fn, items))
+            finally:
+                _maybe_collect()
     with _HEAVY_GATE:
         try:
             return list(_POOL.map(fn, items))
         finally:
-            gc.collect()
+            _maybe_collect()
 
 
 def load_frame(symbol: str, timeframe: str, limit: int = 300) -> pd.DataFrame:
@@ -190,6 +213,7 @@ def hunt(
     min_confidence: float = 75.0,
     volume_spike: float = 2.0,
     venue: str = "crypto",
+    background: bool = False,
 ) -> dict[str, Any]:
     desk = _normalize_venue(venue)
     cap = min(int(top), EQUITY_SCAN_CAP) if desk != "crypto" else int(top)
@@ -198,7 +222,11 @@ def hunt(
     def load() -> dict[str, Any]:
         universe = desk_universe(desk, cap)
         symbols = [row["symbol"] for row in universe]
-        found = _fan_out(lambda s: _scan_one(s, timeframe, min_confidence, volume_spike, desk), symbols)
+        found = _fan_out(
+            lambda s: _scan_one(s, timeframe, min_confidence, volume_spike, desk),
+            symbols,
+            background=background,
+        )
         hits = [h for h in found if h]
         hits.sort(key=lambda h: (h["confidence"], h["volume_ratio"]), reverse=True)
         return {

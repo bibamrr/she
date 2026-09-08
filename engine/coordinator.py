@@ -14,6 +14,11 @@ RISK_AGENT = "Risk_Management"
 REQUIRED_MAJORITY = 0.75
 MIN_SIDE_CONFIDENCE = 0.7
 RISK_VETO_CONFIDENCE = 0.8
+# Most sub-agents answer WAIT whenever their own signal is quiet, so counting
+# abstentions as opposition made the 75% majority unreachable. Consensus is
+# measured among the agents that actually took a side, and this quorum keeps a
+# single lone voice from carrying a trade on its own.
+MIN_DIRECTIONAL_VOTES = 3
 
 DISPLAY_NAMES = {
     "radar_agent": "Radar",
@@ -69,31 +74,46 @@ class MasterCoordinator:
 
         buy_votes = sum(1 for row in results if _norm_vote(row.vote) == BUY)
         sell_votes = sum(1 for row in results if _norm_vote(row.vote) == SELL)
-        total_agents = len(results)
+        directional = buy_votes + sell_votes
         max_votes = max(buy_votes, sell_votes)
-        consensus_ratio = max_votes / total_agents if total_agents > 0 else 0.0
+        consensus_ratio = max_votes / directional if directional > 0 else 0.0
         final_decision = BUY if buy_votes > sell_votes else SELL if sell_votes > buy_votes else WAIT
         side_conf = [float(row.confidence) for row in results if _norm_vote(row.vote) == final_decision]
         avg_confidence = sum(side_conf) / len(side_conf) if side_conf else 0.0
 
-        if consensus_ratio >= self.required_majority and avg_confidence >= MIN_SIDE_CONFIDENCE and final_decision in {BUY, SELL}:
+        if (
+            directional >= MIN_DIRECTIONAL_VOTES
+            and consensus_ratio >= self.required_majority
+            and avg_confidence >= MIN_SIDE_CONFIDENCE
+            and final_decision in {BUY, SELL}
+        ):
             return {
                 "status": "APPROVED",
                 "final_decision": final_decision,
-                "consensus_ratio": consensus_ratio,
+                "consensus_ratio": round(consensus_ratio, 2),
                 "average_confidence": round(avg_confidence, 2),
                 "buy_votes": buy_votes,
                 "sell_votes": sell_votes,
+                "directional_votes": directional,
+                "abstentions": len(results) - directional,
                 "message": f"Approved {final_decision} signal with strict multi-agent consensus.",
             }
+        if directional < MIN_DIRECTIONAL_VOTES:
+            reason = f"Only {directional} of {len(results)} agents took a side; quorum is {MIN_DIRECTIONAL_VOTES}."
+        elif consensus_ratio < self.required_majority:
+            reason = "Consensus threshold not met."
+        else:
+            reason = "Winning side is below the confidence floor."
         return {
             "status": "HOLD",
-            "reason": "Consensus threshold not met.",
+            "reason": reason,
             "final_decision": final_decision,
-            "consensus_ratio": consensus_ratio,
+            "consensus_ratio": round(consensus_ratio, 2),
             "average_confidence": round(avg_confidence, 2),
             "buy_votes": buy_votes,
             "sell_votes": sell_votes,
+            "directional_votes": directional,
+            "abstentions": len(results) - directional,
         }
 
 

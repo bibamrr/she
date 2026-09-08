@@ -20,7 +20,13 @@ DESKS = agent_desk.DESKS
 EXEC_TIMEFRAMES = ("1m", "5m", "15m", "30m", "1h", "4h", "1d")
 EQUITY_TIMEFRAMES = ("5m", "15m", "30m", "1h", "4h", "1d")
 FOLLOW_FLOOR = 60.0
+# A full sweep of every timeframe costs more than one loop interval (equity
+# candles are serialised behind the TradingView socket), so each cycle walks a
+# slice of the frames and the rotation covers them all over a few minutes.
+CRYPTO_FRAMES_PER_CYCLE = 4
+EQUITY_FRAMES_PER_CYCLE = 2
 _ROTATE = 0
+_FRAME_ROTATE = 0
 _TF_WEIGHT = {
     "1m": 0.55,
     "5m": 0.7,
@@ -258,14 +264,29 @@ def _frames_for(venue: str) -> tuple[str, ...]:
     return EXEC_TIMEFRAMES if venue == "crypto" else EQUITY_TIMEFRAMES
 
 
-def gather_hunter_hits(venue: str) -> tuple[list[dict[str, Any]], int]:
-    """Pull every live Hunter setup across timeframes for a desk."""
+def _cycle_frames(venue: str, offset: int) -> tuple[str, ...]:
+    """Rotating slice of a desk's timeframes so one cycle stays inside its budget."""
+    frames = _frames_for(venue)
+    take = CRYPTO_FRAMES_PER_CYCLE if venue == "crypto" else EQUITY_FRAMES_PER_CYCLE
+    if take >= len(frames):
+        return frames
+    start = offset % len(frames)
+    doubled = frames + frames
+    return tuple(doubled[start : start + take])
+
+
+def gather_hunter_hits(
+    venue: str,
+    frames: Optional[tuple[str, ...]] = None,
+    background: bool = False,
+) -> tuple[list[dict[str, Any]], int]:
+    """Pull every live Hunter setup across the given timeframes for a desk."""
     seen: set[str] = set()
     hits: list[dict[str, Any]] = []
     scanned = 0
     top = 12 if venue == "crypto" else 8
-    for timeframe in _frames_for(venue):
-        data = hunt(timeframe, top, FOLLOW_FLOOR, 1.5, venue=venue)
+    for timeframe in frames if frames is not None else _frames_for(venue):
+        data = hunt(timeframe, top, FOLLOW_FLOOR, 1.5, venue=venue, background=background)
         scanned += int(data.get("scanned") or 0)
         for hit in data.get("hits") or []:
             if not is_followable(hit, FOLLOW_FLOOR):
@@ -291,7 +312,7 @@ def tick(session: Session, user: User, venue: Optional[str] = None, hits: Option
         wanted = DESKS[_ROTATE % len(DESKS)]
     if wanted not in DESKS:
         wanted = "crypto"
-    ready, scanned = gather_hunter_hits(wanted)
+    ready, scanned = gather_hunter_hits(wanted, _cycle_frames(wanted, _FRAME_ROTATE))
     swarm.review_hits(session, ready)
     approved = swarm.live_approved(session)
     result = execute_hits(session, user, approved, desk, trust_hunter=True)
@@ -306,12 +327,16 @@ def tick(session: Session, user: User, venue: Optional[str] = None, hits: Option
 
 
 def tick_all() -> dict[str, Any]:
-    global _ROTATE
+    global _ROTATE, _FRAME_ROTATE
     venue = DESKS[_ROTATE % len(DESKS)]
     _ROTATE += 1
-    hits, scanned = gather_hunter_hits(venue)
+    offset = _FRAME_ROTATE
+    _FRAME_ROTATE += 1
+    frames = _cycle_frames(venue, offset)
+    hits, scanned = gather_hunter_hits(venue, frames, background=True)
     if venue != "crypto":
-        extra, extra_scanned = gather_hunter_hits("crypto")
+        # Crypto is cheap and always on; equity desks only get their rotating slice.
+        extra, extra_scanned = gather_hunter_hits("crypto", _cycle_frames("crypto", offset), background=True)
         hits.extend(extra)
         scanned += extra_scanned
         hits.sort(key=lambda row: (float(row.get("confidence") or 0), float(row.get("volume_ratio") or 0)), reverse=True)
@@ -333,7 +358,7 @@ def tick_all() -> dict[str, Any]:
             opened += len(result.get("opened") or [])
     return {
         "venue": venue,
-        "timeframes": list(_frames_for(venue)),
+        "timeframes": list(frames),
         "scanned": scanned,
         "hits": len(hits),
         "approved": approved_n,

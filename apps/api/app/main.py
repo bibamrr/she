@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -59,6 +60,14 @@ app.include_router(ws.router)
 
 @app.on_event("startup")
 async def on_startup() -> None:
+    # uvicorn only wires up its own loggers, so the background workers stayed
+    # silent and there was no way to see whether the desk was ticking.
+    for name in ("shc.agents", "shc.alerts"):
+        worker_log = logging.getLogger(name)
+        worker_log.setLevel(logging.INFO)
+        if not worker_log.handlers:
+            worker_log.addHandler(logging.StreamHandler())
+        worker_log.propagate = False
     init_db()
     app.state.monitor = asyncio.create_task(system.monitor_loop())
     app.state.alerts = asyncio.create_task(alerts.alert_loop())

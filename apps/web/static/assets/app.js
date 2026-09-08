@@ -1480,6 +1480,27 @@ function startMemoryGuard() {
   state.memTimer = setInterval(sweepClientMemory, 30000);
 }
 
+/* Ticks arrive far faster than the screen refreshes: coalesce paint work into
+   one animation frame per cell so a busy tape cannot saturate the main thread. */
+const PAPER_MARK_MS = 2000;
+
+function scheduleCellPaint(cell) {
+  if (!cell || cell.paintQueued) return;
+  cell.paintQueued = true;
+  requestAnimationFrame(() => {
+    cell.paintQueued = false;
+    paintCellHeader(cell);
+  });
+}
+
+function throttledPaperMarks(cell) {
+  if (!cell) return;
+  const now = Date.now();
+  if (now - (cell.paperAt || 0) < PAPER_MARK_MS) return;
+  cell.paperAt = now;
+  void syncPaperMarks(cell);
+}
+
 async function api(path, options = {}) {
   const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
   if (state.token) headers.Authorization = `Bearer ${state.token}`;
@@ -2071,7 +2092,7 @@ async function loadCell(cell, { silent = false } = {}) {
   paintVrcsDashboard(cell);
   if (cell.index === state.activeCell) paintRR(cell);
   if (state.pendingHunt && state.pendingHunt.symbol === cell.symbol) consumePendingHunt(cell);
-  void syncPaperMarks(cell);
+  throttledPaperMarks(cell);
   /* Alerts and auto-fills come only from the Hunter scan, never from the open chart. */
   scheduleRedraw(cell);
 }
@@ -2116,15 +2137,18 @@ function paintLivePrice(cell) {
   const open = Number(bar.open != null ? bar.open : close);
   const up = close >= open;
   const color = up ? "#26a69a" : "#ef5350";
-  try {
-    cell.series.applyOptions({
-      lastValueVisible: true,
-      priceLineVisible: true,
-      priceLineColor: color,
-      priceLineWidth: 1,
-    });
-  } catch {
-    /* series may be mid-rebuild */
+  if (cell.priceLineColor !== color) {
+    cell.priceLineColor = color;
+    try {
+      cell.series.applyOptions({
+        lastValueVisible: true,
+        priceLineVisible: true,
+        priceLineColor: color,
+        priceLineWidth: 1,
+      });
+    } catch {
+      /* series may be mid-rebuild */
+    }
   }
   if (!badge) return;
   const y = cell.series.priceToCoordinate(close);
@@ -2229,9 +2253,8 @@ function applyBinancePayload(cell, payload) {
     }
     pushCellBar(cell, bar, vol);
     cell.lastBar = bar;
-    paintCellHeader(cell);
-    paintLivePrice(cell);
-    void syncPaperMarks(cell);
+    scheduleCellPaint(cell);
+    throttledPaperMarks(cell);
     const pct = bar.open ? ((bar.close - bar.open) / bar.open) * 100 : 0;
     applyLiveQuote(cell, bar.close, pct);
     if (k.x) {
@@ -2336,9 +2359,8 @@ function applyLiveQuote(cell, price, pct) {
   }
   if (cell.bars && cell.bars.length) cell.bars[cell.bars.length - 1] = bar;
   cell.lastBar = bar;
-  paintCellHeader(cell);
-  paintLivePrice(cell);
-  void syncPaperMarks(cell);
+  scheduleCellPaint(cell);
+  throttledPaperMarks(cell);
   const el = document.querySelector(`.cell[data-index="${cell.index}"] .cell-price`);
   if (el) {
     const up = Number(pct) >= 0;

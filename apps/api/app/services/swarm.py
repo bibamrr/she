@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -248,6 +249,12 @@ def is_approved(session: Session, key: str) -> bool:
     return bool(row and row.status == "approved")
 
 
+def is_decided(session: Session, key: str) -> bool:
+    """A signal the coordinator already ruled on needs no second analysis."""
+    row = find(session, key)
+    return bool(row and row.status in {"approved", "rejected", "hold"})
+
+
 def _headlines(symbol: str, venue: str) -> list[dict[str, Any]]:
     try:
         from apps.api.app.services.news import fetch_news
@@ -309,11 +316,9 @@ def _decide(agents: list[dict[str, Any]]) -> dict[str, Any]:
     return {"verdict": verdict, "status": status, "direction": direction_from_vote(decision), "vote": decision}
 
 
-def review_hit(session: Session, hit: dict[str, Any]) -> SwarmReview:
-    key = str(hit.get("signal_key") or signal_key(hit))
-    existing = find(session, key)
-    if existing and existing.status in {"approved", "rejected", "hold"}:
-        return existing
+def _analyze_hit(hit: dict[str, Any]) -> dict[str, Any]:
+    """Network + CPU half of a review. Holds no database session so a batch can
+    run these in parallel and then persist the results one at a time."""
     symbol = str(hit.get("symbol") or "").strip().upper()
     timeframe = str(hit.get("timeframe") or "15m")
     venue = str(hit.get("venue") or "")
@@ -357,6 +362,42 @@ def review_hit(session: Session, hit: dict[str, Any]) -> SwarmReview:
     if status == "approved" and (entry <= 0 or stop <= 0 or target <= 0):
         status = "hold"
         verdict = {**verdict, "status": "HOLD", "reason": "Analysis did not produce a complete IN/SL/TP package."}
+    return {
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "venue": venue,
+        "hunter_dir": hunter_dir,
+        "agents": agents,
+        "direction": direction,
+        "vote": vote,
+        "probability": probability,
+        "verdict": verdict,
+        "status": status,
+        "entry": entry,
+        "stop": stop,
+        "target": target,
+        "targets": targets,
+    }
+
+
+def review_hit(session: Session, hit: dict[str, Any], analysed: Optional[dict[str, Any]] = None) -> SwarmReview:
+    key = str(hit.get("signal_key") or signal_key(hit))
+    existing = find(session, key)
+    if existing and existing.status in {"approved", "rejected", "hold"}:
+        return existing
+    data = analysed if analysed is not None else _analyze_hit(hit)
+    symbol = data["symbol"]
+    timeframe = data["timeframe"]
+    venue = data["venue"]
+    hunter_dir = data["hunter_dir"]
+    agents = data["agents"]
+    direction = data["direction"]
+    vote = data["vote"]
+    probability = data["probability"]
+    verdict = data["verdict"]
+    status = data["status"]
+    entry, stop, target = data["entry"], data["stop"], data["target"]
+    targets = data["targets"]
     now = _now()
     row = existing or SwarmReview(signal_key=key, created_at=now)
     row.symbol = symbol
@@ -398,8 +439,8 @@ def review_hit(session: Session, hit: dict[str, Any]) -> SwarmReview:
 
 
 def review_hits(session: Session, hits: list[dict[str, Any]], limit: int = 8) -> list[SwarmReview]:
-    rows: list[SwarmReview] = []
     seen: set[str] = set()
+    queued: list[dict[str, Any]] = []
     for hit in hits:
         if not is_followable(hit, 60):
             continue
@@ -409,9 +450,27 @@ def review_hits(session: Session, hits: list[dict[str, Any]], limit: int = 8) ->
         seen.add(key)
         packed = dict(hit)
         packed["signal_key"] = key
-        rows.append(review_hit(session, packed))
-        if len(rows) >= limit:
+        queued.append(packed)
+        if len(queued) >= limit:
             break
+    if not queued:
+        return []
+    # Each analysis is several seconds of network wait, so a sequential batch
+    # overran the desk's cycle budget. Analyse together, then write one by one.
+    pending = [item for item in queued if not is_decided(session, str(item["signal_key"]))]
+    analysed: dict[str, dict[str, Any]] = {}
+    if len(pending) > 1:
+        with ThreadPoolExecutor(max_workers=min(4, len(pending)), thread_name_prefix="shc-swarm") as pool:
+            futures = {pool.submit(_analyze_hit, item): str(item["signal_key"]) for item in pending}
+            for future in as_completed(futures):
+                key = futures[future]
+                try:
+                    analysed[key] = future.result()
+                except Exception:  # noqa: BLE001
+                    continue
+    rows: list[SwarmReview] = []
+    for item in queued:
+        rows.append(review_hit(session, item, analysed.get(str(item["signal_key"]))))
     return rows
 
 
