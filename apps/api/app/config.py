@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./data/shc.db"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     default_exchange: str = "binance"
+    # Public Binance market-data host (avoids api.binance.com 451 from US cloud IPs).
+    binance_rest_host: str = "https://data-api.binance.vision"
+    # Optional HTTP(S) proxy, e.g. http://user:pass@host:8080 — used for Binance futures too.
+    market_http_proxy: str = ""
 
     # equity candles provider (documented API, free tier covers US + Tadawul)
     twelvedata_key: str = ""

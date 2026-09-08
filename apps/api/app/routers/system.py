@@ -13,13 +13,18 @@ from typing import Any
 
 from fastapi import APIRouter, Query
 
+from apps.api.app.config import get_settings
 from apps.api.app.services import stocks
 from apps.api.app.services.yahoo import _cache as upstream_cache
 
 router = APIRouter(prefix="/api/system", tags=["system"])
 
 _STARTED = time.time()
-_BINANCE_PING = "https://api.binance.com/api/v3/time"
+
+
+def _binance_ping_url() -> str:
+    host = (get_settings().binance_rest_host or "https://data-api.binance.vision").rstrip("/")
+    return f"{host}/api/v3/time"
 
 
 def _peak_rss_mb() -> float:
@@ -67,7 +72,7 @@ def diagnostics(probe: bool = Query(default=True)) -> dict[str, Any]:
     if probe:
         started = time.perf_counter()
         try:
-            request = urllib.request.Request(_BINANCE_PING, headers={"User-Agent": "SHC/1.0"})
+            request = urllib.request.Request(_binance_ping_url(), headers={"User-Agent": "SHC/1.0"})
             with urllib.request.urlopen(request, timeout=8) as response:
                 payload = json.loads(response.read().decode())
             report["binance"] = {
@@ -104,7 +109,7 @@ def _sample() -> dict[str, Any]:
     }
     started = time.perf_counter()
     try:
-        request = urllib.request.Request(_BINANCE_PING, headers={"User-Agent": "SHC/1.0"})
+        request = urllib.request.Request(_binance_ping_url(), headers={"User-Agent": "SHC/1.0"})
         with urllib.request.urlopen(request, timeout=8):
             pass
         entry["upstream_latency_ms"] = round((time.perf_counter() - started) * 1000, 1)

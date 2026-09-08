@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from apps.api.app.services import stocks
-from apps.api.app.services.market import get_exchange, parse_market_symbol
+from apps.api.app.services.market import fetch_crypto_tickers, parse_market_symbol
 from apps.api.app.services.stables import skip_crypto_hunter
 from apps.api.app.services.yahoo import SAUDI_UNIVERSE, _cached, rank_rows
 
@@ -50,7 +50,7 @@ CRYPTO_SECTORS = {
 
 def crypto_universe() -> list[dict[str, Any]]:
     def load():
-        tickers = get_exchange().fetch_tickers()
+        tickers = fetch_crypto_tickers()
         rows = []
         for symbol, data in tickers.items():
             if not symbol.endswith("/USDT") or symbol.count("/") != 1:

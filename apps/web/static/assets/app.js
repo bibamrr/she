@@ -2062,6 +2062,10 @@ function paintVrcsDashboard(cell) {
 
 /* ------------------------------------------------------- live Binance feed */
 
+function binanceStreamHost(futures) {
+  return futures ? "wss://fstream.binance.com/stream" : "wss://data-stream.binance.vision/stream";
+}
+
 function binanceStreamId(symbol) {
   return parseMarketSymbol(symbol).display.replace("/", "").toLowerCase();
 }
@@ -2156,7 +2160,7 @@ function openBinanceSocket(key, cells, futures) {
     streams.push(`${id}@kline_${tf}`);
     streams.push(`${id}@miniTicker`);
   });
-  const host = futures ? "wss://fstream.binance.com/stream" : "wss://stream.binance.com:9443/stream";
+  const host = binanceStreamHost(futures);
   const socket = new WebSocket(`${host}?streams=${[...new Set(streams)].join("/")}`);
   socket.shcClosed = false;
   socket.shcOpened = Date.now();
@@ -6169,7 +6173,7 @@ function openMarketsSocket(key, symbols, futures) {
   closeLiveSocket(key);
   if (!symbols.length) return;
   const streams = [...new Set(symbols.map((sym) => `${binanceStreamId(sym)}@miniTicker`))];
-  const host = futures ? "wss://fstream.binance.com/stream" : "wss://stream.binance.com:9443/stream";
+  const host = binanceStreamHost(futures);
   const socket = new WebSocket(`${host}?streams=${streams.join("/")}`);
   socket.shcClosed = false;
   state[key] = socket;
