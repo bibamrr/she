@@ -6,6 +6,7 @@ from typing import Any, Callable, TypeVar
 import ccxt
 
 from apps.api.app.services import stocks
+from apps.api.app.services.memory import clamp_limit, tail
 
 _lock = threading.Lock()
 _exchanges: dict[str, ccxt.Exchange] = {}
@@ -365,12 +366,14 @@ def is_crypto(symbol: str) -> bool:
 
 def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 300, delayed: bool = False) -> list[list[Any]]:
     tf = normalize_timeframe(timeframe)
+    limit = clamp_limit(limit)
     extra = 8 if delayed else 0
     spec = parse_market_symbol(symbol)
     if not spec["crypto"]:
         rows = stocks.stock_ohlcv(symbol, tf, limit + extra)
         synced = sync_ohlcv(rows)
-        return delay_ohlcv(synced) if delayed else synced
+        synced = delay_ohlcv(synced) if delayed else synced
+        return tail(synced, limit)
 
     def load(client: ccxt.Exchange, name: str) -> list[list[Any]]:
         used = _timeframe_for(name, tf)
@@ -394,7 +397,9 @@ def fetch_ohlcv(symbol: str, timeframe: str, limit: int = 300, delayed: bool = F
 
     rows = _try_venues(spec["market_type"], load)
     synced = fill_crypto_gaps(sync_ohlcv(rows), tf)
-    return delay_ohlcv(synced, 1) if delayed and not spec["crypto"] else synced[-limit:]
+    if delayed and not spec["crypto"]:
+        synced = delay_ohlcv(synced, 1)
+    return tail(synced, limit)
 
 
 def fetch_ticker(symbol: str) -> dict[str, Any]:

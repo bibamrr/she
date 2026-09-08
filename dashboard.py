@@ -72,7 +72,9 @@ def live_board_html(label: str, sid: str) -> str:
       upColor: "#26a69a", downColor: "#ef5350", borderVisible: false,
       wickUpColor: "#26a69a", wickDownColor: "#ef5350",
     }});
+    const CANDLE_WINDOW = 1000;
     let lastBar = null;
+    let bars = [];
     const tfState = {{}};
     const tfBox = document.getElementById("tfs");
     TFS.forEach((tf) => {{
@@ -110,6 +112,12 @@ def live_board_html(label: str, sid: str) -> str:
         lastBar.close = price;
       }}
       series.update(lastBar);
+      if (!bars.length || bars[bars.length - 1].time !== lastBar.time) bars.push({{ ...lastBar }});
+      else bars[bars.length - 1] = {{ ...lastBar }};
+      if (bars.length > CANDLE_WINDOW) {{
+        bars = bars.slice(-CANDLE_WINDOW);
+        series.setData(bars);
+      }}
       const open = lastBar.open || price;
       paintPrice(price, ((price - open) / open) * 100);
     }}
@@ -136,6 +144,12 @@ def live_board_html(label: str, sid: str) -> str:
         if (k.i === "1s") {{
           lastBar = bar;
           series.update(bar);
+          if (!bars.length || bars[bars.length - 1].time !== bar.time) bars.push(bar);
+          else bars[bars.length - 1] = bar;
+          if (bars.length > CANDLE_WINDOW) {{
+            bars = bars.slice(-CANDLE_WINDOW);
+            series.setData(bars);
+          }}
           paintPrice(bar.close, bar.open ? ((bar.close - bar.open) / bar.open) * 100 : 0);
         }}
         if (tfState[k.i]) {{
@@ -162,6 +176,8 @@ st.divider()
 st.subheader("💬 محادثة وكلاء الذكاء الاصطناعي (Text AI Assistant)")
 if "messages" not in st.session_state:
     st.session_state.messages = []
+if len(st.session_state.messages) > 80:
+    st.session_state.messages = st.session_state.messages[-80:]
 
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
@@ -176,6 +192,8 @@ if prompt := st.chat_input("اكتب سؤالك أو أمرك هنا..."):
         response = f"تم استلام أمرك '{prompt}' بنجاح. الوكلاء والعقل المدبر يحللون المعطيات بدقة."
         st.markdown(response)
         st.session_state.messages.append({"role": "assistant", "content": response})
+        if len(st.session_state.messages) > 80:
+            st.session_state.messages = st.session_state.messages[-80:]
 
 st.divider()
 
@@ -193,7 +211,7 @@ if st.button("🚀 بدء محاكاة الاختبار العكسي المست�
     with st.spinner(f"جاري جلب البيانات التاريخية لـ {bt_symbol} وحساب المحاكاة الكمية..."):
         try:
             exchange = ccxt.binance({"enableRateLimit": True})
-            ohlcv = exchange.fetch_ohlcv(bt_symbol, timeframe=bt_timeframe, limit=700)
+            ohlcv = exchange.fetch_ohlcv(bt_symbol, timeframe=bt_timeframe, limit=1000)
             df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
 
             df['SMA_20'] = df['close'].rolling(window=20).mean()

@@ -61,5 +61,5 @@ class SubscribeRequest(BaseModel):
 class AnalyzeRequest(BaseModel):
     symbol: str = "BTC/USDT"
     timeframe: str = "1h"
-    lookback: int = 300
+    lookback: int = Field(default=300, ge=20, le=1000)
     locale: Optional[str] = "ar"

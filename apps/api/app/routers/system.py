@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import gc
 import json
 import os
 import platform
@@ -15,6 +14,7 @@ from fastapi import APIRouter, Query
 
 from apps.api.app.services import stocks
 from apps.api.app.services.market import binance_rest_v3_base
+from apps.api.app.services.memory import collect, sweep_runtime
 from apps.api.app.services.yahoo import _cache as upstream_cache
 
 router = APIRouter(prefix="/api/system", tags=["system"])
@@ -88,7 +88,7 @@ def diagnostics(probe: bool = Query(default=True)) -> dict[str, Any]:
 def clear_cache() -> dict[str, Any]:
     removed = len(upstream_cache)
     upstream_cache.clear()
-    gc.collect()
+    collect()
     return {"ok": True, "cleared": removed}
 
 
@@ -125,12 +125,7 @@ async def monitor_loop() -> None:
     while True:
         try:
             await asyncio.to_thread(_sample)
-            now = time.time()
-            stale = [k for k, (stamp, _) in list(upstream_cache.items()) if now - stamp > 900]
-            for key in stale:
-                upstream_cache.pop(key, None)
-            if stale:
-                gc.collect()
+            await asyncio.to_thread(sweep_runtime)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001

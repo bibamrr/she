@@ -1379,7 +1379,10 @@ async function loadAccess() {
 /* ------------------------------------------------------- smart data cache */
 
 const cache = new Map();
-const CACHE_MAX = 160;
+const CACHE_MAX = 64;
+const CANDLE_WINDOW = 1000;
+const CACHE_TTL_MS = 120000;
+const SET_MAX = 400;
 
 function cacheGet(key, ttlMs) {
   const hit = cache.get(key);
@@ -1396,6 +1399,85 @@ function cacheGet(key, ttlMs) {
 function cacheSet(key, value) {
   cache.set(key, { at: Date.now(), value });
   while (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);
+}
+
+function trimWindow(items) {
+  if (!items || !items.length) return items || [];
+  return items.length > CANDLE_WINDOW ? items.slice(-CANDLE_WINDOW) : items;
+}
+
+function trimSet(set, max) {
+  if (!set || set.size <= max) return;
+  const drop = set.size - max;
+  let n = 0;
+  for (const key of set) {
+    set.delete(key);
+    if (++n >= drop) break;
+  }
+}
+
+function trimCellHistory(cell) {
+  if (!cell || !cell.bars || cell.bars.length <= CANDLE_WINDOW) return;
+  cell.bars = cell.bars.slice(-CANDLE_WINDOW);
+  cell.vols = (cell.vols || []).slice(-CANDLE_WINDOW);
+  try {
+    cell.series.setData(cell.bars);
+    if (cell.volume) cell.volume.setData(cell.vols);
+  } catch {
+    /* keep the live socket; next setData will resync */
+  }
+  cell.lastBar = cell.bars[cell.bars.length - 1] || cell.lastBar;
+}
+
+function pushCellBar(cell, bar, vol) {
+  if (!cell.bars) cell.bars = [];
+  if (!cell.vols) cell.vols = [];
+  const last = cell.bars[cell.bars.length - 1];
+  if (last && last.time === bar.time) {
+    cell.bars[cell.bars.length - 1] = bar;
+    if (vol) cell.vols[cell.vols.length - 1] = vol;
+  } else if (!last || bar.time > last.time) {
+    cell.bars.push(bar);
+    if (vol) cell.vols.push(vol);
+  }
+  trimCellHistory(cell);
+}
+
+function sweepClientMemory() {
+  const now = Date.now();
+  [...cache.entries()].forEach(([key, hit]) => {
+    if (now - hit.at > CACHE_TTL_MS) cache.delete(key);
+  });
+  while (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);
+  trimSet(state.firedAlerts, SET_MAX);
+  trimSet(state.swarmSeen, SET_MAX);
+  (state.cells || []).forEach((cell) => {
+    if (!cell) return;
+    trimCellHistory(cell);
+    if (!cell.pack) return;
+    cell.pack.candles = trimWindow(cell.pack.candles);
+    cell.pack.volume = trimWindow(cell.pack.volume);
+    if (cell.pack.overlays) {
+      Object.keys(cell.pack.overlays).forEach((key) => {
+        cell.pack.overlays[key] = trimWindow(cell.pack.overlays[key]);
+      });
+    }
+    if (cell.pack.oscillators) {
+      Object.keys(cell.pack.oscillators).forEach((key) => {
+        if (Array.isArray(cell.pack.oscillators[key])) {
+          cell.pack.oscillators[key] = trimWindow(cell.pack.oscillators[key]);
+        }
+      });
+    }
+    if (cell.pack.vrcs && Array.isArray(cell.pack.vrcs.signals) && cell.pack.vrcs.signals.length > SET_MAX) {
+      cell.pack.vrcs.signals = cell.pack.vrcs.signals.slice(-SET_MAX);
+    }
+  });
+}
+
+function startMemoryGuard() {
+  if (state.memTimer) clearInterval(state.memTimer);
+  state.memTimer = setInterval(sweepClientMemory, 30000);
 }
 
 async function api(path, options = {}) {
@@ -1692,6 +1774,8 @@ function createCell(index, symbol) {
     osc: null,
     oscSeries: {},
     pack: null,
+    bars: [],
+    vols: [],
     fitted: false,
     lastBar: null,
     canvas: root.querySelector(".draw-layer"),
@@ -1936,6 +2020,13 @@ async function loadCell(cell, { silent = false } = {}) {
     if (!silent) setCellStatus(cell, `<span class="down">${err.message}</span>`);
     return;
   }
+  pack.candles = trimWindow(pack.candles);
+  pack.volume = trimWindow(pack.volume);
+  if (pack.overlays) {
+    Object.keys(pack.overlays).forEach((key) => {
+      pack.overlays[key] = trimWindow(pack.overlays[key]);
+    });
+  }
   cell.pack = pack;
   const compressed = (pack.vrcs && pack.vrcs.compressed) || [];
   const candles = pack.candles.map((c, i) => {
@@ -1947,10 +2038,12 @@ async function loadCell(cell, { silent = false } = {}) {
     }
     return bar;
   });
-  cell.series.setData(candles);
+  cell.bars = candles;
+  cell.vols = pack.volume || [];
+  cell.series.setData(cell.bars);
   cell.lastBar = candles[candles.length - 1] || null;
   cell.series.setMarkers(markersFor(cell, pack));
-  cell.volume.setData(pack.volume || []);
+  cell.volume.setData(cell.vols);
 
   const wanted = new Set(Object.keys(pack.overlays || {}));
   wanted.forEach((key) => overlaySeries(cell, key).setData(pack.overlays[key]));
@@ -2123,16 +2216,18 @@ function applyBinancePayload(cell, payload) {
       low: Number(k.l),
       close: Number(k.c),
     };
+    const vol = {
+      time: bar.time,
+      value: Number(k.v),
+      color: bar.close >= bar.open ? "#26a69a88" : "#ef535088",
+    };
     try {
       cell.series.update(bar);
-      cell.volume.update({
-        time: bar.time,
-        value: Number(k.v),
-        color: bar.close >= bar.open ? "#26a69a88" : "#ef535088",
-      });
+      cell.volume.update(vol);
     } catch {
       return;
     }
+    pushCellBar(cell, bar, vol);
     cell.lastBar = bar;
     paintCellHeader(cell);
     paintLivePrice(cell);
@@ -2226,20 +2321,20 @@ function applyLiveQuote(cell, price, pct) {
     pct = ((close - Number(cell.lastBar.open)) / Number(cell.lastBar.open)) * 100;
   }
   const last = cell.lastBar;
-  const bar = last
-    ? {
-        time: last.time,
-        open: last.open,
-        high: Math.max(Number(last.high), close),
-        low: Math.min(Number(last.low), close),
-        close,
-      }
-    : { time: Math.floor(Date.now() / 1000), open: close, high: close, low: close, close };
+  if (!last) return;
+  const bar = {
+    time: last.time,
+    open: last.open,
+    high: Math.max(Number(last.high), close),
+    low: Math.min(Number(last.low), close),
+    close,
+  };
   try {
     cell.series.update(bar);
   } catch {
     return;
   }
+  if (cell.bars && cell.bars.length) cell.bars[cell.bars.length - 1] = bar;
   cell.lastBar = bar;
   paintCellHeader(cell);
   paintLivePrice(cell);
@@ -2524,6 +2619,7 @@ function startPoll() {
       }
       void loadCell(cell, { silent: true });
     });
+    sweepClientMemory();
   }, ms);
 }
 
@@ -7411,6 +7507,7 @@ async function boot() {
   });
   await route();
   watchSwarm();
+  startMemoryGuard();
 }
 
 boot();

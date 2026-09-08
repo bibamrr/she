@@ -37,7 +37,7 @@ def ticker(symbol: str = Query(default="BTC/USDT")) -> dict:
 def ohlcv(
     symbol: str = Query(default="BTC/USDT"),
     timeframe: str = Query(default="15m"),
-    limit: int = Query(default=400, ge=20, le=1500),
+    limit: int = Query(default=400, ge=20, le=1000),
 ) -> dict:
     source = normalize_timeframe(timeframe)
     try:

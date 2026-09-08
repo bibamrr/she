@@ -9,6 +9,8 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+from apps.api.app.services.memory import CACHE_MAX, CACHE_STALE_SECONDS, clamp_limit, tail
+
 _cache: dict[str, tuple[float, Any]] = {}
 _lock = threading.Lock()
 _UA = {
@@ -71,7 +73,7 @@ SAUDI_UNIVERSE = [
 ]
 
 
-_CACHE_MAX = 240
+_CACHE_MAX = CACHE_MAX
 
 _EURO_SFX = (".L", ".PA", ".DE", ".AS", ".MI", ".SW", ".MC")
 _ASIA_SFX = (".T", ".HK", ".KS", ".KQ", ".SS", ".SZ", ".AX", ".TW", ".NS", ".BO")
@@ -102,7 +104,8 @@ def _cached(key: str, ttl: float, loader):
     with _lock:
         _cache[key] = (now, value)
         # drop stale entries, then cap the dict so long sessions cannot creep upward
-        for stale_key in [k for k, (stamp, _) in _cache.items() if now - stamp > max(ttl, 600)]:
+        stale_after = max(ttl, CACHE_STALE_SECONDS)
+        for stale_key in [k for k, (stamp, _) in _cache.items() if now - stamp > stale_after]:
             _cache.pop(stale_key, None)
         while len(_cache) > _CACHE_MAX:
             _cache.pop(next(iter(_cache)), None)
@@ -318,7 +321,7 @@ def yahoo_ohlcv(symbol: str, timeframe: str, limit: int = 300) -> list[list[Any]
         if None in (o, h, l, c):
             continue
         rows.append([int(tstamp) * 1000, float(o), float(h), float(l), float(c), float(v or 0)])
-    return rows[-limit:]
+    return tail(rows, clamp_limit(limit))
 
 
 def rank_rows(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:

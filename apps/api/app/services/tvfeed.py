@@ -16,6 +16,8 @@ from typing import Any
 
 from websockets.sync.client import connect
 
+from apps.api.app.services.memory import clamp_limit, tail
+
 _UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -101,6 +103,7 @@ def tv_ohlcv(tv_symbol: str, timeframe: str, limit: int = 300, timeout: float = 
     """Fetch OHLCV for an ``EXCHANGE:TICKER`` symbol over the public chart socket."""
     if not tv_symbol:
         raise RuntimeError("missing TradingView symbol")
+    limit = clamp_limit(limit)
     resolution = _RES.get(timeframe, "1D")
     chart = _sid("cs_")
     symbol_spec = json.dumps(
@@ -123,7 +126,7 @@ def tv_ohlcv(tv_symbol: str, timeframe: str, limit: int = 300, timeout: float = 
             ws.send(_frame("set_auth_token", ["unauthorized_user_token"]))
             ws.send(_frame("chart_create_session", [chart, ""]))
             ws.send(_frame("resolve_symbol", [chart, "sds_sym_1", f"={symbol_spec}"]))
-            ws.send(_frame("create_series", [chart, "sds_1", "s1", "sds_sym_1", resolution, int(min(limit, 5000))]))
+            ws.send(_frame("create_series", [chart, "sds_1", "s1", "sds_sym_1", resolution, int(limit)]))
             deadline = time.time() + timeout
             while time.time() < deadline:
                 try:
@@ -157,4 +160,4 @@ def tv_ohlcv(tv_symbol: str, timeframe: str, limit: int = 300, timeout: float = 
         raise RuntimeError(f"No TradingView history for {tv_symbol}")
     by_ts: dict[int, list[Any]] = {int(row[0]): row for row in rows}
     ordered = [by_ts[key] for key in sorted(by_ts)]
-    return ordered[-limit:]
+    return tail(ordered, limit)

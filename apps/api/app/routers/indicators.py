@@ -38,7 +38,7 @@ def compute(
     symbol: str = Query(default="BTC/USDT"),
     timeframe: str = Query(default="15m"),
     ids: str = Query(default="vrcs,volume,ema12"),
-    limit: int = Query(default=400, ge=80, le=1500),
+    limit: int = Query(default=400, ge=80, le=1000),
     compression_period: int = Query(default=20, ge=5, le=200),
     threshold_multiplier: float = Query(default=0.6, ge=0.1, le=1.5),
     volume_factor: float = Query(default=0.7, ge=0.1, le=1.5),

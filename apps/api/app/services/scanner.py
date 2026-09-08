@@ -5,6 +5,7 @@ from typing import Any
 from apps.api.app.services import stocks
 from apps.api.app.services.market import fetch_crypto_tickers, parse_market_symbol
 from apps.api.app.services.stables import skip_crypto_hunter
+from apps.api.app.services.memory import TICKER_UNIVERSE_MAX
 from apps.api.app.services.yahoo import SAUDI_UNIVERSE, _cached, rank_rows
 
 EQUITY_VENUES = ("us", "tadawul", "europe", "asia", "commodities")
@@ -73,7 +74,8 @@ def crypto_universe() -> list[dict[str, Any]]:
                     "market_type": "spot",
                 }
             )
-        return rows
+        rows.sort(key=lambda item: float(item.get("quote_volume") or 0), reverse=True)
+        return rows[:TICKER_UNIVERSE_MAX]
 
     return _cached("crypto_tickers", 45, load)
 

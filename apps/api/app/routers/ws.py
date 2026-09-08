@@ -149,6 +149,7 @@ async def market_socket(websocket: WebSocket) -> None:
     except (WebSocketDisconnect, RuntimeError):
         return
     finally:
+        latest.clear()
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)

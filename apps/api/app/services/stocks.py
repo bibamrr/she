@@ -19,6 +19,7 @@ from typing import Any
 
 from apps.api.app.config import get_settings
 from apps.api.app.services.tvfeed import tv_ohlcv
+from apps.api.app.services.memory import CANDLE_WINDOW, clamp_limit, tail
 from apps.api.app.services.yahoo import _cached, rank_rows, yahoo_ohlcv
 
 _CANDLE_DIR = Path("data/candles")
@@ -489,7 +490,7 @@ def _twelvedata_ohlcv(symbol: str, timeframe: str, limit: int) -> list[list[Any]
     params = {
         "symbol": _ticker_only(symbol),
         "interval": interval,
-        "outputsize": str(min(limit, 5000)),
+        "outputsize": str(min(clamp_limit(limit), 5000)),
         "apikey": key,
         "order": "ASC",
         "format": "JSON",
@@ -515,7 +516,7 @@ def _twelvedata_ohlcv(symbol: str, timeframe: str, limit: int) -> list[list[Any]
                 float(bar.get("volume") or 0),
             ]
         )
-    return rows[-limit:]
+    return tail(rows, clamp_limit(limit))
 
 
 def _cache_path(symbol: str, timeframe: str) -> Path:
@@ -535,7 +536,7 @@ def _read_candle_cache(symbol: str, timeframe: str, max_age: float | None) -> li
     if max_age is not None and time.time() - stamp > max_age:
         return None
     rows = payload.get("rows") or []
-    return rows if rows else None
+    return tail(rows, CANDLE_WINDOW) if rows else None
 
 
 def _write_candle_cache(symbol: str, timeframe: str, rows: list[list[Any]]) -> None:
@@ -543,7 +544,7 @@ def _write_candle_cache(symbol: str, timeframe: str, rows: list[list[Any]]) -> N
         return
     try:
         _CANDLE_DIR.mkdir(parents=True, exist_ok=True)
-        _cache_path(symbol, timeframe).write_text(json.dumps({"ts": time.time(), "rows": rows[-1500:]}))
+        _cache_path(symbol, timeframe).write_text(json.dumps({"ts": time.time(), "rows": tail(rows, CANDLE_WINDOW)}))
     except Exception:
         pass
 
@@ -626,7 +627,7 @@ def stock_ohlcv(symbol: str, timeframe: str, limit: int = 300) -> list[list[Any]
         patched = _patch_last_bar(rows, symbol)
         if persist:
             _write_candle_cache(symbol, timeframe, patched)
-        return patched[-limit:]
+        return tail(patched, clamp_limit(limit))
 
     if get_settings().twelvedata_key:
         try:

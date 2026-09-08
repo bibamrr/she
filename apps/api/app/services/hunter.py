@@ -9,6 +9,7 @@ from typing import Any
 import pandas as pd
 
 from apps.api.app.services.market import fetch_ohlcv
+from apps.api.app.services.memory import clamp_limit
 from apps.api.app.services.scanner import crypto_universe
 from apps.api.app.services.stables import has_tradable_volatility, skip_crypto_hunter
 from apps.api.app.services.yahoo import _cached
@@ -37,7 +38,7 @@ def _fan_out(fn, items: list[Any]) -> list[Any]:
 
 
 def load_frame(symbol: str, timeframe: str, limit: int = 300) -> pd.DataFrame:
-    rows = fetch_ohlcv(symbol, timeframe, limit)
+    rows = fetch_ohlcv(symbol, timeframe, clamp_limit(limit))
     df = ohlcv_to_df(rows)
     df["time"] = [int(r[0] / 1000) for r in rows]
     return df
