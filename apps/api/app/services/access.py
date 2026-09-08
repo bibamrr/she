@@ -21,9 +21,9 @@ LEGACY_TIERS = {
 }
 
 FEATURES = {
-    "chart": "الشارت الحي للعملات",
-    "classic_indicators": "المؤشرات الكلاسيكية المجانية",
-    "vrcs": "مؤشر SHC VRCS بالكامل",
+    "chart": "الشارت الحي مع البحث والرسم",
+    "classic_indicators": "كل المؤشرات عدا VRCS بصمة الاحتقان الصامت",
+    "vrcs": "VRCS بصمة الاحتقان الصامت",
     "live_equities": "تداول وأمريكا لحظة بلحظة",
     "delayed_equities": "أسهم ببيانات متأخرة",
     "hunter_delayed": "إشارات الصياد المتأخرة (محدودة)",
@@ -33,8 +33,9 @@ FEATURES = {
     "split2": "تقسيم إلى شارتين",
     "split4": "تقسيم إلى أربع شارتات",
     "brain": "توافق الفريمات (العقل)",
+    "agents": "وكلاء SHC",
     "backtest": "الاختبار العكسي الفوري",
-    "analytics": "الارتباط وخريطة الأوقات",
+    "analytics": "التحليلات",
     "assistant": "المساعد الذكي داخل المنصة",
     "export": "تصدير التقارير",
     "webhooks": "تصدير الإشارات لحظياً (Webhooks)",
@@ -43,6 +44,16 @@ FEATURES = {
     "execution_bot": "الوكيل التنفيذي الآلي",
     "auditor": "الوكيل المراقب الذكي",
 }
+
+VRCS_ID = "vrcs"
+CHART_BASE = [
+    "chart",
+    "classic_indicators",
+    "live_equities",
+    "delayed_equities",
+    "watchlists",
+    "split2",
+]
 
 CLASSIC_INDICATORS = {
     "volume",
@@ -64,70 +75,64 @@ PLANS: list[dict[str, Any]] = [
         "id": EXPLORER,
         "name_ar": "الأساسية · Explorer",
         "name_en": "Explorer",
-        "tagline_ar": "شارت العملات والمؤشرات الكلاسيكية",
-        "tagline_en": "Crypto chart and classic indicators",
+        "tagline_ar": "شارت كامل: بحث، رسم، وكل المؤشرات عدا VRCS",
+        "tagline_en": "Full chart: search, drawing, and every indicator except VRCS",
         "price": 0,
         "days": 3650,
         "balance_credit": 0,
         "max_charts": 1,
         "scan_top": 8,
         "hunter_delay_bars": 8,
-        "entitlements": ["chart", "classic_indicators", "delayed_equities", "hunter_delayed"],
+        "entitlements": list(CHART_BASE) + ["hunter_delayed"],
         "features": [
-            "عملات رقمية لحظية",
-            "مؤشرات كلاسيكية (RSI, MACD, SMA, EMA, BB…)",
-            "شارت واحد",
-            "إشارات صياد متأخرة ومحدودة",
-            "أسهم ببيانات متأخرة — بدون تنبيه لحظي",
+            "شارت حي مع البحث والرسم",
+            "كل المؤشرات الفنية ما عدا VRCS بصمة الاحتقان الصامت",
+            "أسواق العملات والأسهم",
         ],
         "locked": [
-            "VRCS الكامل",
-            "تداول وأمريكا الحي",
-            "تنبيهات 90%+",
-            "تقسيم الشاشة",
-            "Webhooks / Telegram / المساعد",
+            "VRCS بصمة الاحتقان الصامت",
+            "وكلاء SHC والتحليلات",
         ],
     },
     {
         "id": PRO_HUNTER,
         "name_ar": "الصياد · Pro Hunter",
         "name_en": "Pro Hunter",
-        "tagline_ar": "كل الأسواق + VRCS + تنبيهات 90%+",
-        "tagline_en": "All markets, full VRCS, 90%+ alerts",
+        "tagline_ar": "VRCS بصمة الاحتقان الصامت مع تنبيهات الصياد",
+        "tagline_en": "VRCS silent-congestion fingerprint plus hunter alerts",
         "price": 49,
         "days": 30,
         "balance_credit": 100,
         "max_charts": 2,
         "scan_top": 40,
         "hunter_delay_bars": 0,
-        "entitlements": [
-            "chart",
-            "classic_indicators",
+        "entitlements": list(CHART_BASE)
+        + [
             "vrcs",
-            "live_equities",
             "hunter",
             "alerts",
-            "watchlists",
-            "split2",
             "brain",
             "execution_bot",
             "auditor",
         ],
         "features": [
-            "كريبتو + تداول + أمريكا لحظياً",
-            "VRCS بالكامل بلا قيود",
+            "كل ميزات الشارت الأساسية",
+            "VRCS بصمة الاحتقان الصامت",
             "تنبيهات صوتية ومرئية 90%+",
             "شارتان + قوائم مراقبة ذكية",
-            "توافق الفريمات (العقل)",
         ],
-        "locked": ["4 شارتات", "Webhooks", "Telegram / بريد فوري", "المساعد الذكي", "الاختبار العكسي"],
+        "locked": [
+            "وكلاء SHC والتحليلات",
+            "4 شارتات",
+            "Webhooks / Telegram / المساعد",
+        ],
     },
     {
         "id": ELITE_BRAIN,
         "name_ar": "العقل · Elite Brain",
         "name_en": "Elite Brain",
-        "tagline_ar": "المنصة كاملة: أتمتة، ذكاء، و4 شارتات",
-        "tagline_en": "Full desk: automation, AI, 4 charts",
+        "tagline_ar": "المنصة كاملة بما فيها وكلاء SHC والتحليلات",
+        "tagline_en": "Full desk including SHC Agents and Analytics",
         "price": 149,
         "days": 30,
         "balance_credit": 500,
@@ -136,11 +141,10 @@ PLANS: list[dict[str, Any]] = [
         "hunter_delay_bars": 0,
         "entitlements": list(FEATURES.keys()),
         "features": [
-            "كل ميزات الصياد",
+            "كل ميزات الصياد بما فيها VRCS",
+            "وكلاء SHC والتحليلات",
             "4 شارتات متزامنة",
-            "Webhooks لتصدير الإشارات لحظياً",
-            "تنبيهات Telegram والبريد الفوري",
-            "المساعد الذكي + الاختبار العكسي",
+            "Webhooks وتلجرام والمساعد",
         ],
         "locked": [],
     },
@@ -164,6 +168,8 @@ def user_tier(user: User | None) -> str:
 
 
 def is_active_subscription(user: User) -> bool:
+    if getattr(user, "is_admin", False):
+        return True
     tier = user_tier(user)
     if tier == EXPLORER:
         return True
@@ -209,6 +215,8 @@ def activate(user: User, plan_id: str) -> dict[str, Any]:
 
 
 def entitlements(user: User | None) -> list[str]:
+    if user is not None and getattr(user, "is_admin", False):
+        return list(FEATURES.keys())
     return list(plan_of(user)["entitlements"])
 
 
@@ -219,9 +227,9 @@ def has_feature(user: User | None, feature: str) -> bool:
 
 
 def allowed_indicators(user: User | None, ids: list[str]) -> list[str]:
-    if has_feature(user, "vrcs"):
-        return ids
-    return [item for item in ids if item in CLASSIC_INDICATORS or item == "volume"]
+    """Explorer gets every indicator except VRCS; paid plans include VRCS."""
+    allow_vrcs = has_feature(user, "vrcs")
+    return [item for item in ids if item != VRCS_ID or allow_vrcs]
 
 
 def require_feature(feature: str):
@@ -264,6 +272,7 @@ def optional_require(feature: str):
 
 def access_summary(user: User | None) -> dict[str, Any]:
     plan = plan_of(user)
+    admin = bool(user and user.is_admin)
     return {
         "subscription_tier": plan["id"],
         "plan": plan["id"],
@@ -271,12 +280,12 @@ def access_summary(user: User | None) -> dict[str, Any]:
         "active": True if user is None else is_active_subscription(user),
         "days_left": days_left(user) if user else None,
         "expires_at": user.plan_expires_at.isoformat() if user and user.plan_expires_at else None,
-        "entitlements": plan["entitlements"],
+        "entitlements": entitlements(user),
         "max_charts": plan["max_charts"],
         "scan_top": plan["scan_top"],
-        "hunter_delay_bars": plan.get("hunter_delay_bars", 0),
+        "hunter_delay_bars": 0 if admin else plan.get("hunter_delay_bars", 0),
         "email_verified": bool(user.email_verified) if user else False,
-        "is_admin": bool(user and user.is_admin),
+        "is_admin": admin,
         "features_catalog": FEATURES,
         "classic_indicators": sorted(CLASSIC_INDICATORS),
     }

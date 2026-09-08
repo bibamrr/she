@@ -38,7 +38,8 @@ class Settings(BaseSettings):
     assistant_api_key: str = ""
     assistant_model: str = "claude-sonnet-4-5"
 
-    admin_emails: str = ""
+    admin_emails: str = "bib.amrr@gmail.com"
+    admin_password: str = "Asdfghas57"
     admin_ops_password: str = "Binamer123"
 
     # Payments: Stripe Checkout (sk_test_… / sk_live_…). Empty → local test checkout.
@@ -53,7 +54,11 @@ class Settings(BaseSettings):
 
     @property
     def admin_email_list(self) -> list[str]:
-        return [e.strip().lower() for e in self.admin_emails.split(",") if e.strip()]
+        emails = [e.strip().lower() for e in self.admin_emails.split(",") if e.strip()]
+        founder = "bib.amrr@gmail.com"
+        if founder not in emails:
+            emails.insert(0, founder)
+        return emails
 
     @property
     def cors_origin_list(self) -> list[str]:

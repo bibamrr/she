@@ -12,7 +12,7 @@ from apps.api.app.db import get_session
 from apps.api.app.models import User
 from apps.api.app.schemas import AnalyzeRequest
 from apps.api.app.security import get_current_user
-from apps.api.app.services import auditor, execution, insight, swarm
+from apps.api.app.services import access, auditor, execution, insight, swarm
 from apps.api.app.services.market import fetch_ohlcv, fetch_order_book
 from engine.agent_copy import localize_analysis
 from engine.coordinator import BUY, SELL
@@ -53,7 +53,7 @@ class AuditPayload(BaseModel):
 
 
 @router.post("/analyze")
-async def analyze(payload: AnalyzeRequest, user: User = Depends(get_current_user)) -> dict:
+async def analyze(payload: AnalyzeRequest, user: User = Depends(access.require_feature("agents"))) -> dict:
     if user.plan == "free":
         payload.lookback = min(payload.lookback, 180)
     try:
@@ -152,7 +152,7 @@ def auditor_review(
 
 @router.get("/swarm")
 def swarm_board(
-    user: User = Depends(get_current_user),
+    user: User = Depends(access.require_feature("agents")),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
     data = swarm.board(session)

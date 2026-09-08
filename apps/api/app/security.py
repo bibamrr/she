@@ -26,6 +26,42 @@ def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain, hashed)
 
 
+def is_platform_admin(email: str) -> bool:
+    return (email or "").strip().lower() in get_settings().admin_email_list
+
+
+def stamp_admin(user: User) -> bool:
+    """Grant the founder/admin account full desk access. Returns True if the row changed."""
+    if not user or not is_platform_admin(user.email):
+        return False
+    changed = False
+    if not user.is_admin:
+        user.is_admin = True
+        changed = True
+    if not user.is_active:
+        user.is_active = True
+        changed = True
+    if not user.email_verified:
+        user.email_verified = True
+        changed = True
+    if user.verify_token:
+        user.verify_token = ""
+        changed = True
+    if user.subscription_tier != "elite_brain" or user.plan != "elite_brain":
+        user.subscription_tier = "elite_brain"
+        user.plan = "elite_brain"
+        changed = True
+    if user.plan_expires_at is not None:
+        user.plan_expires_at = None
+        changed = True
+    if user.totp_enabled:
+        user.totp_enabled = False
+        user.totp_secret = ""
+        user.totp_backup = ""
+        changed = True
+    return changed
+
+
 def create_access_token(subject: str) -> str:
     settings = get_settings()
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_expire_minutes)
@@ -56,6 +92,10 @@ def get_current_user(
     user = session.exec(select(User).where(User.email == email)).first()
     if not user or not user.is_active:
         raise credentials_error
+    if stamp_admin(user):
+        session.add(user)
+        session.commit()
+        session.refresh(user)
     return user
 
 
@@ -75,4 +115,8 @@ def get_optional_user(
     user = session.exec(select(User).where(User.email == email)).first()
     if not user or not user.is_active:
         return None
+    if stamp_admin(user):
+        session.add(user)
+        session.commit()
+        session.refresh(user)
     return user

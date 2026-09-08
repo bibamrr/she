@@ -26,9 +26,9 @@ def catalog(user: Optional[User] = Depends(get_optional_user)) -> dict:
     items = []
     for item in CATALOG:
         row = dict(item)
-        locked = not full_vrcs and item["id"] not in access.CLASSIC_INDICATORS
+        locked = item["id"] == access.VRCS_ID and not full_vrcs
         row["locked"] = locked
-        row["min_tier"] = "explorer" if item["id"] in access.CLASSIC_INDICATORS else "pro_hunter"
+        row["min_tier"] = "pro_hunter" if item["id"] == access.VRCS_ID else "explorer"
         items.append(row)
     return {"indicators": items, "timeframes": TIMEFRAMES, "classic": sorted(access.CLASSIC_INDICATORS)}
 

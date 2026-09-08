@@ -25,11 +25,20 @@ def _now() -> datetime:
 
 
 def password_ok(password: str) -> bool:
-    expected = (get_settings().admin_ops_password or "Binamer123").encode()
+    settings = get_settings()
     given = (password or "").encode()
-    left = hmac.new(b"shc-ops", expected, "sha256").digest()
-    right = hmac.new(b"shc-ops", given, "sha256").digest()
-    return hmac.compare_digest(left, right)
+    candidates = [
+        settings.admin_ops_password or "Binamer123",
+        settings.admin_password or "",
+    ]
+    for expected in candidates:
+        if not expected:
+            continue
+        left = hmac.new(b"shc-ops", expected.encode(), "sha256").digest()
+        right = hmac.new(b"shc-ops", given, "sha256").digest()
+        if hmac.compare_digest(left, right):
+            return True
+    return False
 
 
 def issue_token() -> str:

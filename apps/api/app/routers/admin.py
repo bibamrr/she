@@ -9,7 +9,7 @@ from sqlmodel import Session, select
 
 from apps.api.app.db import get_session
 from apps.api.app.models import User
-from apps.api.app.security import get_current_user
+from apps.api.app.security import get_current_user, get_optional_user
 from apps.api.app.services import access, ops
 from apps.api.app.routers import system
 
@@ -26,11 +26,16 @@ def _require_admin(user: User = Depends(get_current_user)) -> User:
     return user
 
 
-def _require_ops(x_admin_ops: Optional[str] = Header(default=None, alias="X-Admin-Ops")) -> str:
+def _require_ops(
+    x_admin_ops: Optional[str] = Header(default=None, alias="X-Admin-Ops"),
+    user: Optional[User] = Depends(get_optional_user),
+) -> str:
     token = (x_admin_ops or "").strip()
-    if not ops.token_ok(token):
-        raise HTTPException(status_code=401, detail="locked")
-    return token
+    if ops.token_ok(token):
+        return token
+    if user and user.is_admin:
+        return "admin-session"
+    raise HTTPException(status_code=401, detail="locked")
 
 
 @router.get("/command")

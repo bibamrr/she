@@ -71,6 +71,33 @@ def _migrate_sqlite() -> None:
         connection.commit()
 
 
+def _seed_founder_admin() -> None:
+    from sqlmodel import Session, select
+
+    from apps.api.app.models import User
+    from apps.api.app.security import hash_password, stamp_admin, verify_password
+
+    email = "bib.amrr@gmail.com"
+    password = (get_settings().admin_password or "Asdfghas57").strip()
+    if not email or not password:
+        return
+    with Session(engine) as session:
+        user = session.exec(select(User).where(User.email == email)).first()
+        if user is None:
+            user = User(
+                email=email,
+                hashed_password=hash_password(password),
+                display_name="عبدالاله",
+                locale="ar",
+            )
+            session.add(user)
+        elif not verify_password(password, user.hashed_password):
+            user.hashed_password = hash_password(password)
+        stamp_admin(user)
+        session.add(user)
+        session.commit()
+
+
 def init_db() -> None:
     if settings.database_url.startswith("sqlite"):
         Path("data").mkdir(parents=True, exist_ok=True)
@@ -81,6 +108,7 @@ def init_db() -> None:
     SQLModel.metadata.create_all(engine)
     if settings.database_url.startswith("sqlite"):
         _migrate_sqlite()
+    _seed_founder_admin()
 
 
 def get_session():

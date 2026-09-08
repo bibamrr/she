@@ -30,7 +30,7 @@ const I18N = {
     indicators: "المؤشرات",
     chart: "الرسم البياني",
     panels: "اللوحات",
-    vrcs: "بصمة الهدوء والاحتقان VRCS",
+    vrcs: "VRCS بصمة الاحتقان الصامت",
     compression: "احتقان صامت / تجميع صانع السوق",
     spring_bullish: "انطلاق الزنبرك صعوداً",
     spring_bearish: "انطلاق الزنبرك هبوطاً",
@@ -459,7 +459,7 @@ const I18N = {
     indicators: "Indicators",
     chart: "Chart",
     panels: "Panels",
-    vrcs: "VRCS quiet-compression fingerprint",
+    vrcs: "VRCS silent-congestion fingerprint",
     compression: "Silent compression / smart-money coil",
     spring_bullish: "Bullish spring",
     spring_bearish: "Bearish spring",
@@ -1150,7 +1150,7 @@ const state = {
   locale: localeMeta(localStorage.getItem("shc_locale") || "ar").id,
   token: localStorage.getItem("shc_token") || "",
   user: null,
-  access: { subscription_tier: "explorer", entitlements: ["chart", "classic_indicators", "delayed_equities", "hunter_delayed"], max_charts: 1 },
+  access: { subscription_tier: "explorer", entitlements: ["chart", "classic_indicators", "live_equities", "delayed_equities", "watchlists", "split2", "hunter_delayed"], max_charts: 1 },
   watchlist: readJSON("shc_watch", ["BTC/USDT", "ETH/USDT"]),
   timeframe: localStorage.getItem("shc_tf") || "15m",
   view: "terminal",
@@ -1329,6 +1329,10 @@ function can(feature) {
   return list.includes(feature);
 }
 
+function vrcsLocked() {
+  return !can("vrcs");
+}
+
 function maxCharts() {
   return Number((state.access && state.access.max_charts) || 1);
 }
@@ -1368,7 +1372,7 @@ async function loadAccess() {
       persist("shc_inds", [...state.active]);
     }
   } catch {
-    state.access = { subscription_tier: "explorer", entitlements: ["chart", "classic_indicators", "delayed_equities", "hunter_delayed"], max_charts: 1 };
+    state.access = { subscription_tier: "explorer", entitlements: ["chart", "classic_indicators", "live_equities", "delayed_equities", "watchlists", "split2", "hunter_delayed"], max_charts: 1 };
   }
 }
 
@@ -4025,6 +4029,7 @@ async function paintLiveSetups() {
 }
 
 function watchSwarm() {
+  if (!can("agents")) return;
   if (state.swarmTimer) return;
   state.swarmTimer = setInterval(() => void paintLiveSetups(), 15000);
   void paintLiveSetups();
@@ -4033,6 +4038,17 @@ function watchSwarm() {
 async function renderAgentsPage() {
   state.view = "agents";
   teardown();
+  if (!can("agents")) {
+    document.getElementById("app").innerHTML = pageShell(
+      t("pageAgents"),
+      t("locked"),
+      `<div class="card"><p>${t("paywallTitle")}</p><p class="muted">${t("elite_brain")}</p><button class="primary wide" id="up">${t("upgrade")}</button></div>`,
+    );
+    bindChrome();
+    const up = document.getElementById("up");
+    if (up) up.onclick = () => go("plans");
+    return;
+  }
   document.getElementById("app").innerHTML = pageShell(
     t("pageAgents"),
     t("agentsSilent"),
@@ -4133,6 +4149,17 @@ async function loadAnalyticsProfile(symbol) {
 async function renderAnalyticsPage() {
   state.view = "analytics";
   teardown();
+  if (!can("analytics")) {
+    document.getElementById("app").innerHTML = pageShell(
+      t("pageAnalytics"),
+      t("locked"),
+      `<div class="card"><p>${t("paywallTitle")}</p><p class="muted">${t("elite_brain")}</p><button class="primary wide" id="up">${t("upgrade")}</button></div>`,
+    );
+    bindChrome();
+    const up = document.getElementById("up");
+    if (up) up.onclick = () => go("plans");
+    return;
+  }
   const frames = TIMEFRAMES.filter((id) => id !== "1s");
   const tf = frames.includes(state.timeframe) ? state.timeframe : "1h";
   document.getElementById("app").innerHTML = pageShell(
@@ -4553,7 +4580,7 @@ function liveSearchRows(q) {
 
 function toggleIndicator(id) {
   const item = catalogItems().find((ind) => ind.id === id);
-  if (item && item.locked && !can("vrcs") && id !== "volume") {
+  if ((item && item.id === "vrcs" && vrcsLocked()) || (id === "vrcs" && vrcsLocked())) {
     paywall("vrcs");
     return false;
   }
@@ -4868,7 +4895,12 @@ function topbar() {
       <img class="brand-logo" src="/assets/shc-logo.svg" alt="SHC" />
     </a>
     <nav class="main-nav">
-      ${nav.map(([id, label]) => `<button class="ghost tiny nav-item ${page === id ? "active" : ""}" data-go="${id}">${ico(id)}<span>${label}</span></button>`).join("")}
+      ${nav
+        .map(([id, label]) => {
+          const locked = (id === "agents" && !can("agents")) || (id === "analytics" && !can("analytics"));
+          return `<button class="ghost tiny nav-item ${page === id ? "active" : ""} ${locked ? "locked" : ""}" data-go="${id}">${ico(id)}<span>${label}</span>${locked ? " 🔒" : ""}</button>`;
+        })
+        .join("")}
     </nav>
     <div class="topbar-actions">
       <span id="feed-status" class="muted small"></span>
@@ -5025,7 +5057,7 @@ const FALLBACK_CATALOG = [
   { id: "chaikin", name: "Chaikin Oscillator", group: "volume" },
   { id: "fi", name: "Force Index", group: "volume" },
   { id: "eom", name: "Ease of Movement", group: "volume" },
-].map((ind) => ({ ...ind, locked: !CLASSIC_FREE.has(ind.id) }));
+].map((ind) => ({ ...ind, locked: ind.id === "vrcs" }));
 
 function catalogItems() {
   return Array.isArray(state.catalog) && state.catalog.length ? state.catalog : FALLBACK_CATALOG;
@@ -5044,7 +5076,7 @@ function indicatorRows() {
         list
           .map(
             (ind) => {
-              const locked = ind.locked && !can("vrcs") && ind.id !== "volume";
+              const locked = ind.id === "vrcs" && vrcsLocked();
               return `<label class="check ${locked ? "locked" : ""}"><input type="checkbox" data-ind="${ind.id}" ${
                 state.active.has(ind.id) ? "checked" : ""
               } ${locked ? "data-lock=1" : ""}/> ${ind.id === "vrcs" ? t("vrcs") : ind.name}${locked ? " 🔒" : ""}</label>`;
@@ -5600,6 +5632,10 @@ async function renderChartPage() {
               <input id="sym-search" placeholder="${t("search")}" autocomplete="off" />
               <div id="search-hits"></div>
             </div>
+            <span class="sep"></span>
+            ${drawMenu()}
+            <span class="sep"></span>
+            ${indicatorMenu()}
             ${
               simple
                 ? ""
@@ -5608,10 +5644,6 @@ async function renderChartPage() {
             ${[1, 2, 4]
               .map((n) => `<button class="${state.split === n ? "primary" : "ghost"} tiny split" data-split="${n}">${n}${n > maxCharts() ? " 🔒" : ""}</button>`)
               .join("")}
-            <span class="sep"></span>
-            ${drawMenu()}
-            <span class="sep"></span>
-            ${indicatorMenu()}
             <span class="sep"></span>
             <button class="ghost tiny ico-btn" id="share-btn">${ico("share")}<span>${t("shareChart")}</span></button>
             <button class="ghost tiny ico-btn" id="panel-toggle" title="${state.panelOpen === false ? t("showSide") : t("hideSide")}">${ico(state.panelOpen === false ? "panelShow" : "panelHide")}<span>${state.panelOpen === false ? t("showSide") : t("hideSide")}</span></button>`
@@ -5669,8 +5701,8 @@ async function renderChartPage() {
     if (!isPanelOpen()) toggleSidePanel();
   };
   applyPanelOpen();
+  bindIndicatorMenu();
   if (!simple) {
-    bindIndicatorMenu();
     document.querySelectorAll("[data-panel]").forEach((btn) => {
       btn.onclick = () => {
         state.panel = btn.dataset.panel;
@@ -6608,7 +6640,7 @@ function bindOpsGate() {
 async function renderAdminPage() {
   state.view = "admin";
   teardown();
-  if (!state.opsToken) {
+  if (!state.opsToken && !(state.user && state.user.is_admin)) {
     document.getElementById("app").innerHTML = `<div class="ops-gate">
       <form class="auth-card" id="ops-form">
         <div class="brand"><img class="brand-logo" src="/assets/shc-logo.svg" alt="SHC" /></div>
