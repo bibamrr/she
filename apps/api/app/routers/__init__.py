@@ -1,0 +1,33 @@
+from apps.api.app.routers import (
+    agents,
+    assistant,
+    auth,
+    hunter,
+    indicators,
+    market,
+    scanner,
+    subscriptions,
+    system,
+    ws,
+    alerts,
+    paper,
+    watchlist,
+    news,
+)
+
+__all__ = [
+    "agents",
+    "assistant",
+    "auth",
+    "hunter",
+    "indicators",
+    "market",
+    "scanner",
+    "subscriptions",
+    "system",
+    "ws",
+    "alerts",
+    "paper",
+    "watchlist",
+    "news",
+]

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 64" role="img" aria-label="SHC">
+  <defs>
+    <linearGradient id="shcGold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f2d98a" />
+      <stop offset="45%" stop-color="#c8a45a" />
+      <stop offset="100%" stop-color="#8a6b2c" />
+    </linearGradient>
+  </defs>
+  <g>
+    <rect x="1.5" y="1.5" width="61" height="61" rx="14" fill="#07090d" stroke="url(#shcGold)" stroke-width="2" />
+    <!-- compression coil releasing into a spring: the VRCS signature -->
+    <path d="M11 46h8l4-6 4 6 4-6 4 6 4-9 5-14 5 24" fill="none" stroke="url(#shcGold)"
+      stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="53" cy="19" r="3.6" fill="#f2d98a" />
+    <text x="78" y="43" font-family="'IBM Plex Sans','Helvetica Neue',Arial,sans-serif" font-size="34"
+      font-weight="700" letter-spacing="6" fill="url(#shcGold)">SHC</text>
+  </g>
+</svg>
