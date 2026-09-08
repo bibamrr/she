@@ -2145,6 +2145,10 @@ function applyBinancePayload(cell, payload) {
     }
     return;
   }
+  if (payload.e === "aggTrade" || payload.e === "trade") {
+    applyLiveQuote(cell, Number(payload.p), null);
+    return;
+  }
   if (payload.e === "24hrMiniTicker" || (payload.c != null && payload.s && !payload.k)) {
     const close = Number(payload.c);
     const open = Number(payload.o);
@@ -2161,6 +2165,7 @@ function openBinanceSocket(key, cells, futures) {
   const streams = [];
   cells.forEach((cell) => {
     const id = binanceStreamId(cell.symbol);
+    streams.push(`${id}@aggTrade`);
     streams.push(`${id}@kline_${tf}`);
     streams.push(`${id}@miniTicker`);
   });
@@ -2217,6 +2222,9 @@ function openBinanceSocket(key, cells, futures) {
 function applyLiveQuote(cell, price, pct) {
   const close = Number(price);
   if (!cell || !cell.series || !Number.isFinite(close)) return;
+  if (pct == null && cell.lastBar && Number(cell.lastBar.open)) {
+    pct = ((close - Number(cell.lastBar.open)) / Number(cell.lastBar.open)) * 100;
+  }
   const last = cell.lastBar;
   const bar = last
     ? {
@@ -2258,7 +2266,7 @@ function connectDeskFeed() {
     state.deskWs.close();
     state.deskWs = null;
   }
-  const desk = state.cells.filter((cell) => !parseMarketSymbol(cell.symbol).crypto || isFuturesSymbol(cell.symbol));
+  const desk = state.cells.filter((cell) => cell && cell.symbol);
   if (!desk.length || !chartLiveOn()) return;
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const symbols = desk.map((cell) => cell.symbol).slice(0, 8).join(",");
